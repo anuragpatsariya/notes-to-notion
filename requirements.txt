@@ -1,0 +1,12 @@
+# Install in this order:
+# 1. First install torch and torchvision
+torch>=1.9.0
+torchvision>=0.10.0
+
+# 2. Then install other dependencies
+opencv-python
+Pillow
+layoutparser[layoutmodels]
+
+# 3. Finally install detectron2 separately:
+# python -m pip install 'git+https://github.com/facebookresearch/detectron2.git'

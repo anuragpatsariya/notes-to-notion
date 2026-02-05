@@ -1,0 +1,7 @@
+# Simple requirements without detectron2
+# Use this if you have trouble installing the full requirements
+
+opencv-python
+python-dotenv
+requests
+Pillow

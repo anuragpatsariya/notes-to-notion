@@ -6,6 +6,7 @@ A React application that uploads images, extracts text and content using OpenAI'
 
 - 🖼️ **Image Upload**: Drag and drop or click to upload images (JPEG, PNG, GIF, BMP, WebP)
 - 🤖 **AI Text Extraction**: Uses OpenAI's GPT-4o to extract text, charts, diagrams, and other content from images
+- 📊 **Figure Extraction**: Automatically detects and extracts figures, charts, and diagrams from handwritten notes using Layout Parser
 - 📝 **Notion Integration**: Automatically creates new pages in your Notion database with the extracted content
 - 🎨 **Modern UI**: Beautiful, responsive interface with real-time processing feedback
 
@@ -13,9 +14,11 @@ A React application that uploads images, extracts text and content using OpenAI'
 
 Before running this application, you'll need:
 
-1. **OpenAI API Key**: Get one from [OpenAI Platform](https://platform.openai.com/api-keys)
-2. **Notion API Key**: Create an integration at [Notion Integrations](https://www.notion.so/my-integrations)
-3. **Notion Database ID**: The ID of the database where pages will be created
+1. **Node.js**: Version 16 or higher
+2. **Python**: Version 3.8 or higher (for figure extraction feature)
+3. **OpenAI API Key**: Get one from [OpenAI Platform](https://platform.openai.com/api-keys)
+4. **Notion API Key**: Create an integration at [Notion Integrations](https://www.notion.so/my-integrations)
+5. **Notion Database ID**: The ID of the database where pages will be created
 
 ## Setup Instructions
 
@@ -24,10 +27,34 @@ Before running this application, you'll need:
 ```bash
 git clone <repository-url>
 cd image-to-text-to-notion
+
+# Install Node.js dependencies
 npm install
 ```
 
-### 2. Environment Configuration
+### 2. Install Python Dependencies (for Figure Extraction)
+
+**Option A: Automated Installation (Recommended)**
+```bash
+chmod +x install_python_deps.sh
+./install_python_deps.sh
+```
+
+**Option B: Manual Installation**
+```bash
+# Step 1: Install PyTorch first (required)
+pip install torch torchvision
+
+# Step 2: Install other dependencies
+pip install opencv-python Pillow "layoutparser[layoutmodels]"
+
+# Step 3: Install detectron2 from GitHub
+python -m pip install 'git+https://github.com/facebookresearch/detectron2.git'
+```
+
+**Note**: If Python installation fails, the app will still work for text extraction. Figure extraction is an optional feature. See `PYTHON_SETUP.md` for troubleshooting.
+
+### 3. Environment Configuration
 
 Create a `.env` file in the root directory with the following variables:
 
@@ -45,7 +72,7 @@ NOTION_DATABASE_ID=your_notion_database_id_here
 PORT=3001
 ```
 
-### 3. Notion Setup
+### 4. Notion Setup
 
 1. Go to [Notion Integrations](https://www.notion.so/my-integrations)
 2. Create a new integration
@@ -54,7 +81,7 @@ PORT=3001
 5. Share the database with your integration
 6. Copy the database ID from the URL (the part after the last `/`)
 
-### 4. Running the Application
+### 5. Running the Application
 
 #### Development Mode (Frontend + Backend)
 ```bash
@@ -83,8 +110,36 @@ npm run server
 ## API Endpoints
 
 - `POST /api/extract-text`: Extracts text from an image using OpenAI
+- `POST /api/extract-figures`: Extracts figures/charts from handwritten notes using Layout Parser
 - `POST /api/create-notion-page`: Creates a new page in Notion
 - `GET /api/health`: Health check endpoint
+
+### Figure Extraction Endpoint
+
+The `/api/extract-figures` endpoint uses a Python script with Layout Parser to detect and extract figures, charts, and diagrams from images:
+
+```bash
+# Request body
+{
+  "image": "base64_encoded_image_data",
+  "filename": "optional_filename.jpg"
+}
+
+# Response
+{
+  "success": true,
+  "extracted_count": 2,
+  "extracted_images": [
+    {
+      "path": "temp_image_storage/note_figure_0.jpg",
+      "base64": "data:image/jpeg;base64,...",
+      "filename": "note_figure_0.jpg"
+    }
+  ]
+}
+```
+
+Extracted images are saved in the `temp_image_storage/` folder.
 
 ## Technologies Used
 

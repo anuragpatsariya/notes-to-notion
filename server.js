@@ -3,6 +3,7 @@ const cors = require('cors');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 require('dotenv').config();
 
 const app = express();
@@ -63,8 +64,20 @@ async function extractChartImages(base64Image, filename) {
       }
     );
 
-    const chartData = JSON.parse(response.data.choices[0].message.content);
-    return chartData.charts || [];
+    let content = response.data.choices[0].message.content;
+    
+    // Clean up the response - remove markdown formatting if present
+    content = content.replace(/```json\s*/g, '').replace(/```\s*$/g, '');
+    content = content.trim();
+    
+    try {
+      const chartData = JSON.parse(content);
+      return chartData.charts || [];
+    } catch (parseError) {
+      console.error('Error parsing chart data JSON:', parseError);
+      console.log('Raw content:', content);
+      return [];
+    }
   } catch (error) {
     console.error('Error extracting chart data:', error);
     return [];
@@ -323,30 +336,8 @@ app.post('/api/create-notion-page', async (req, res) => {
     // Process content to handle emojis and charts better
     const processedContent = processContentForNotion(content);
     
-    // Add original image if provided (with size limit check)
-    if (originalImage && originalImage.length < 1000000) { // Limit to ~1MB
-      try {
-        processedContent.unshift({
-          object: 'block',
-          type: 'image',
-          image: {
-            type: 'external',
-            external: {
-              url: `data:image/jpeg;base64,${originalImage}`
-            }
-          }
-        });
-        
-        // Add a divider after the image
-        processedContent.splice(1, 0, {
-          object: 'block',
-          type: 'divider',
-          divider: {}
-        });
-      } catch (error) {
-        console.log('Image too large, skipping image upload to Notion');
-      }
-    }
+    // Note: Notion external URLs have a 2000 character limit, so we can't use base64 data
+    // The original image will be described in the text content instead
     
     // Add chart images if found
     if (chartImages.length > 0) {
@@ -389,19 +380,7 @@ app.post('/api/create-notion-page', async (req, res) => {
           }
         });
         
-        // Add chart image (we'll use the original image for now since cropping is complex)
-        if (originalImage && originalImage.length < 1000000) {
-          processedContent.push({
-            object: 'block',
-            type: 'image',
-            image: {
-              type: 'external',
-              external: {
-                url: `data:image/jpeg;base64,${originalImage}`
-              }
-            }
-          });
-        }
+        // Chart images are described in the text content since Notion has URL length limits
       }
     }
     
@@ -454,6 +433,107 @@ app.post('/api/create-notion-page', async (req, res) => {
     res.status(500).json({ 
       error: errorMessage,
       details: error.response?.data?.message || error.message
+    });
+  }
+});
+
+// Extract figures from handwritten notes using Python script
+app.post('/api/extract-figures', async (req, res) => {
+  try {
+    const { image, filename } = req.body;
+    
+    if (!image) {
+      return res.status(400).json({ error: 'Image data is required' });
+    }
+
+    // Create temp_image_storage directory if it doesn't exist
+    const outputFolder = path.join(__dirname, 'temp_image_storage');
+    if (!fs.existsSync(outputFolder)) {
+      fs.mkdirSync(outputFolder, { recursive: true });
+    }
+
+    // Save the uploaded image temporarily
+    const baseFilename = filename ? filename.replace(/\.[^/.]+$/, '') : 'uploaded_note';
+    const tempImagePath = path.join(outputFolder, `${baseFilename}_input.jpg`);
+    
+    // Decode base64 and save
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+    fs.writeFileSync(tempImagePath, imageBuffer);
+
+    // Call Python script to extract figures
+    // Try OpenAI-based extractor first (simpler, no detectron2 needed)
+    const pythonScript = fs.existsSync(path.join(__dirname, 'extract-images-openai.py'))
+      ? 'extract-images-openai.py'
+      : 'find-image.py';
+    
+    const pythonProcess = spawn('python3', [
+      path.join(__dirname, pythonScript),
+      tempImagePath,
+      outputFolder
+    ]);
+
+    let pythonOutput = '';
+    let pythonError = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+      pythonOutput += data.toString();
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      pythonError += data.toString();
+    });
+
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        console.error('Python script error:', pythonError);
+        return res.status(500).json({ 
+          error: 'Failed to extract figures from image',
+          details: pythonError || 'Python script execution failed'
+        });
+      }
+
+      try {
+        const result = JSON.parse(pythonOutput);
+        
+        if (!result.success) {
+          return res.status(500).json({ 
+            error: 'Failed to extract figures',
+            details: result.error
+          });
+        }
+
+        // Convert extracted images to base64 for frontend display
+        const extractedImagesBase64 = result.extracted_images.map(imgPath => {
+          const imgBuffer = fs.readFileSync(imgPath);
+          return {
+            path: imgPath,
+            base64: `data:image/jpeg;base64,${imgBuffer.toString('base64')}`,
+            filename: path.basename(imgPath)
+          };
+        });
+
+        res.json({
+          success: true,
+          extracted_count: result.extracted_count,
+          extracted_images: extractedImagesBase64,
+          message: `Successfully extracted ${result.extracted_count} figure(s) from the image`
+        });
+
+      } catch (parseError) {
+        console.error('Error parsing Python output:', parseError);
+        res.status(500).json({ 
+          error: 'Failed to parse extraction results',
+          details: parseError.message
+        });
+      }
+    });
+
+  } catch (error) {
+    console.error('Extract Figures Error:', error);
+    res.status(500).json({ 
+      error: 'Failed to process image',
+      details: error.message
     });
   }
 });
